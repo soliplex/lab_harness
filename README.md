@@ -12,7 +12,7 @@ There is no PyPI release. Pin a tag:
 
 ```toml
 dependencies = [
-    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.1",
+    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2",
 ]
 ```
 
@@ -117,7 +117,7 @@ env = environs.build(
     released,
     Path("envs/v078"),
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.1",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2",
     ),
 )
 print(env.python)        # interpreter to drive trials with
@@ -150,7 +150,7 @@ env = environs.build(
         )
     ],
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.1",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2",
     ),
 )
 ```
@@ -159,6 +159,32 @@ The overlay refuses to *create* a file: a typo in `destination` would
 otherwise silently add something the software never shipped, and the arm
 would measure software nobody runs. It also lands in `metadata()`, so the
 arm describes itself.
+
+### Verify an install before spending trials
+
+A built environment is only trustworthy while it still matches what was
+installed. Two ways it stops matching, both silent:
+
+```python
+environs.verify_install(env)
+```
+
+- **Something wrote into it.** Raises `InstallDiverged`, naming the files.
+  The case this was built for: an overlay applied through the hardlink uv
+  shares with its cache, which rewrites the same file in every sibling
+  environment holding that distribution -- and poisons the cache for later
+  installs.
+- **A declared overlay did not land.** Raises `OverlayNotApplied`, so an arm
+  cannot quietly measure the unmodified software while reporting that it
+  does not.
+
+By default the accepted changes are the environment's own overlay
+destinations, so the ordinary call takes no arguments and an overlay arm
+passes while a corrupted one does not. Pass `expect_modified=[...]` to check
+against a different set.
+
+Neither failure produces an error on its own -- both produce *plausible
+numbers* -- which is why this is worth asserting rather than assuming.
 
 ### Everything shells out through an injected runner
 
