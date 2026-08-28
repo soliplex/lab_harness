@@ -321,3 +321,123 @@ def test_overlay_does_not_write_through_a_hardlink(tmp_path):
     assert shipped.read_text(encoding="utf-8") == "overlaid"
     assert cached.read_text(encoding="utf-8") == "original"
     assert sibling.read_text(encoding="utf-8") == "original"
+
+
+# -- verify_install -------------------------------------------------------
+
+
+def install_with_record(root, files, *, distribution="soliplex"):
+    """Lay out a fake install whose RECORD matches what is on disk."""
+    import base64
+    import hashlib
+
+    site = make_venv(root)
+    lines = []
+    for name, content in files.items():
+        target = site / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        digest = hashlib.sha256(content.encode()).digest()
+        encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+        lines.append(f"{name},sha256={encoded},{len(content)}")
+    info = site / f"{distribution}-1.0.dist-info"
+    info.mkdir()
+    # RECORD lists itself with no hash, as installers do.
+    lines.append(f"{distribution}-1.0.dist-info/RECORD,,")
+    (info / "RECORD").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return site
+
+
+def make_env(root, **kwargs):
+    return environs.Environment(
+        pin=environs.Pin(name="a", version="1.0"), root=root, **kwargs
+    )
+
+
+def test_verify_install_accepts_a_pristine_install(tmp_path):
+    root = tmp_path / "env"
+    install_with_record(root, {"soliplex/a.py": "x = 1\n"})
+
+    assert environs.verify_install(make_env(root)) == {}
+
+
+def test_verify_install_rejects_an_unexpected_change(tmp_path):
+    """The corruption this exists to catch."""
+    root = tmp_path / "env"
+    site = install_with_record(root, {"soliplex/a.py": "x = 1\n"})
+    (site / "soliplex/a.py").write_text("x = 2\n", encoding="utf-8")
+
+    with pytest.raises(environs.InstallDiverged) as caught:
+        environs.verify_install(make_env(root))
+
+    assert caught.value.unexpected == ["soliplex/a.py"]
+
+
+def test_verify_install_reports_a_missing_file(tmp_path):
+    root = tmp_path / "env"
+    site = install_with_record(root, {"soliplex/a.py": "x = 1\n"})
+    (site / "soliplex/a.py").unlink()
+
+    with pytest.raises(environs.InstallDiverged):
+        environs.verify_install(make_env(root))
+
+
+def test_verify_install_allows_a_declared_overlay(tmp_path):
+    root = tmp_path / "env"
+    site = install_with_record(root, {"s/SKILL.md": "old\n"})
+    (site / "s/SKILL.md").write_text("new\n", encoding="utf-8")
+    overlay = environs.Overlay(
+        source=tmp_path / "unused", destination="s/SKILL.md"
+    )
+
+    accepted = environs.verify_install(make_env(root, overlays=(overlay,)))
+
+    assert list(accepted) == ["s/SKILL.md"]
+
+
+def test_verify_install_catches_an_overlay_that_did_not_land(tmp_path):
+    """An arm that is not the arm it claims to be."""
+    root = tmp_path / "env"
+    install_with_record(root, {"s/SKILL.md": "old\n"})
+    overlay = environs.Overlay(
+        source=tmp_path / "unused", destination="s/SKILL.md"
+    )
+
+    with pytest.raises(environs.OverlayNotApplied) as caught:
+        environs.verify_install(make_env(root, overlays=(overlay,)))
+
+    assert caught.value.destinations == ["s/SKILL.md"]
+
+
+def test_verify_install_ignores_bytecode_and_external_paths(tmp_path):
+    root = tmp_path / "env"
+    site = install_with_record(root, {"soliplex/a.py": "x = 1\n"})
+    record = next(site.glob("soliplex-1.0.dist-info/RECORD"))
+    record.write_text(
+        record.read_text(encoding="utf-8")
+        + "soliplex/__pycache__/a.cpython-313.pyc,sha256=bogus,1\n"
+        + "../../../bin/soliplex-cli,sha256=bogus,1\n",
+        encoding="utf-8",
+    )
+
+    assert environs.verify_install(make_env(root)) == {}
+
+
+def test_verify_install_needs_a_record(tmp_path):
+    root = tmp_path / "env"
+    make_venv(root)
+
+    with pytest.raises(environs.NoRecord):
+        environs.verify_install(make_env(root))
+
+
+def test_verify_install_explicit_expect_modified_wins(tmp_path):
+    root = tmp_path / "env"
+    site = install_with_record(root, {"a.md": "old\n"})
+    (site / "a.md").write_text("new\n", encoding="utf-8")
+
+    accepted = environs.verify_install(
+        make_env(root), expect_modified=["a.md"]
+    )
+
+    assert list(accepted) == ["a.md"]

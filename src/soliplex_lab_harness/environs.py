@@ -15,7 +15,9 @@ exercisable without a network or a real uv.
 
 from __future__ import annotations
 
+import base64
 import dataclasses
+import hashlib
 import os
 import pathlib
 import re
@@ -88,6 +90,56 @@ class OverlayDestinationMissing(EnvironmentBuildError):
             f"overlay destination {destination!r} does not exist under "
             f"{site}; an overlay replaces shipped content, it does not add "
             "new files"
+        )
+
+
+class NoRecord(EnvironmentBuildError):
+    def __init__(self, distribution: str, site: pathlib.Path):
+        self.distribution = distribution
+        self.site = site
+        super().__init__(
+            f"no {distribution}-*.dist-info/RECORD under {site}"
+        )
+
+
+class InstallDiverged(EnvironmentBuildError):
+    """Installed files do not match the distribution's own RECORD.
+
+    Almost always means something wrote into the environment after
+    installation. The case this was built for: writing through a hardlink
+    that uv shares with its cache, which silently rewrites the same file in
+    every sibling environment holding that distribution.
+    """
+
+    def __init__(
+        self, distribution: str, unexpected: Sequence[str]
+    ):
+        self.distribution = distribution
+        self.unexpected = list(unexpected)
+        listed = ", ".join(self.unexpected[:5])
+        more = (
+            f" (and {len(self.unexpected) - 5} more)"
+            if len(self.unexpected) > 5
+            else ""
+        )
+        super().__init__(
+            f"{distribution} install diverges from its RECORD at: "
+            f"{listed}{more}"
+        )
+
+
+class OverlayNotApplied(EnvironmentBuildError):
+    """An overlay was declared but the file still matches RECORD.
+
+    So the arm is not the arm it claims to be, and would measure the
+    unmodified software while reporting otherwise.
+    """
+
+    def __init__(self, destinations: Sequence[str]):
+        self.destinations = list(destinations)
+        super().__init__(
+            "overlay declared but file unchanged: "
+            + ", ".join(self.destinations)
         )
 
 
@@ -305,3 +357,108 @@ def apply_overlays(
             raise OverlayDestinationMissing(overlay.destination, site)
         target.unlink()
         shutil.copyfile(overlay.source, target)
+
+
+# -- verifying an install ------------------------------------------------
+#
+# A built environment is only trustworthy if it still matches what was
+# installed. Two ways it can stop matching, both silent:
+#
+#   * something wrote into it -- notably an overlay applied through a
+#     hardlink uv shares with its cache, which rewrites the same file in
+#     every sibling environment holding that distribution
+#   * an overlay was declared and did not land, so the arm measures the
+#     unmodified software while reporting that it does not
+#
+# Both produce plausible numbers rather than errors, so they are worth
+# asserting before spending trials.
+
+
+def _record_path(
+    environment: Environment, distribution: str
+) -> pathlib.Path:
+    site = environment.site_packages()
+    for candidate in sorted(site.glob(f"{distribution}-*.dist-info/RECORD")):
+        return candidate
+    raise NoRecord(distribution, site)
+
+
+def _file_hash(path: pathlib.Path) -> str:
+    digest = hashlib.sha256(path.read_bytes()).digest()
+    encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return f"sha256={encoded}"
+
+
+def record_entries(
+    environment: Environment, distribution: str
+) -> dict[str, str]:
+    """Map site-relative path -> expected hash, from the RECORD file.
+
+    Entries with no hash (RECORD itself, and anything the installer chose
+    not to checksum) are skipped, as are paths outside site-packages and
+    compiled bytecode, none of which say anything about tampering.
+    """
+    entries: dict[str, str] = {}
+    text = _record_path(environment, distribution).read_text(
+        encoding="utf-8"
+    )
+    for line in text.splitlines():
+        name, _, rest = line.partition(",")
+        expected = rest.split(",")[0] if rest else ""
+        if not name or not expected:
+            continue
+        if name.startswith("..") or name.endswith(".pyc"):
+            continue
+        entries[name] = expected
+    return entries
+
+
+def diverged(
+    environment: Environment, distribution: str
+) -> dict[str, str | None]:
+    """Site-relative paths whose contents no longer match RECORD.
+
+    The value is the on-disk hash, or ``None`` when the file is missing.
+    """
+    site = environment.site_packages()
+    out: dict[str, str | None] = {}
+    for name, expected in record_entries(environment, distribution).items():
+        target = site / name
+        if not target.is_file():
+            out[name] = None
+        elif _file_hash(target) != expected:
+            out[name] = _file_hash(target)
+    return out
+
+
+def verify_install(
+    environment: Environment,
+    distribution: str | None = None,
+    *,
+    expect_modified: Iterable[str] = (),
+) -> dict[str, str | None]:
+    """Assert the install matches RECORD except where an overlay says so.
+
+    ``expect_modified`` is the set of site-relative paths an overlay was
+    meant to change; by default it is taken from the environment's own
+    overlays, so the ordinary call is ``verify_install(env)``.
+
+    Raises :class:`InstallDiverged` for any *other* changed file, and
+    :class:`OverlayNotApplied` if a declared overlay left its target
+    untouched. Returns the divergences it accepted.
+    """
+    distribution = distribution or environment.pin.package
+    expected_set = set(expect_modified) or {
+        overlay.destination for overlay in environment.overlays
+    }
+    found = diverged(environment, distribution)
+
+    unexpected = sorted(set(found) - expected_set)
+    if unexpected:
+        raise InstallDiverged(distribution, unexpected)
+
+    missing = sorted(expected_set - set(found))
+    if missing:
+        raise OverlayNotApplied(missing)
+
+    return found
