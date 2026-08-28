@@ -46,4 +46,4 @@ Release notes live in **GitHub Releases**. Do not add a `CHANGELOG.md`.
 
 There is no PyPI release. Consumers pin a tag:
 
-    soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.0
+    soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1
