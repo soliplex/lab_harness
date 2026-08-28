@@ -14,6 +14,7 @@ change per experiment, and a jig depends on a pinned version of it.
 | `records` | one record per trial, appended to JSONL |
 | `drive` | runs one turn against an installation, in process |
 | `scoring` | turns records into rates, with pluggable checks |
+| `environs` | builds one virtualenv per code-axis value |
 
 Import the modules, not names from the package root.
 
@@ -81,6 +82,72 @@ print(scoring.render([result], checks))
 commit sha, exact model id, endpoint. A result whose arm cannot be identified
 afterwards is not a result.
 
+## Code axes install; they do not check out
+
+Each code-axis value is a `Pin` -- an exact released version, or a git ref --
+installed into its own virtualenv:
+
+```python
+from pathlib import Path
+
+from soliplex_lab_harness import environs
+
+released = environs.Pin(name="v078", version="0.78.1")
+from_ref = environs.Pin(
+    name="tip",
+    url="https://github.com/soliplex/soliplex",
+    ref="v0.78.1",
+)
+
+env = environs.build(
+    released,
+    Path("envs/v078"),
+    extra_requirements=("soliplex-lab-harness==0.1.0",),
+)
+print(env.python)        # interpreter to drive trials with
+print(env.metadata())    # stamp this onto every record from this arm
+```
+
+`extra_requirements` normally includes this package, because a trial is
+driven in process: the harness has to be importable in the environment that
+holds the software under test. Passing it explicitly also forces the
+experiment to record *which harness version measured the run*.
+
+`build()` resolves a tag or branch to a **commit sha** via `git ls-remote`
+and puts it in `metadata()`. Recording a tag records nothing -- tags can be
+moved, and branches certainly are.
+
+### Overlays: isolating co-landed changes
+
+A release bundles every change in it. To attribute an effect to one of them
+you need an arm that is "ref A, but with this one file from ref B":
+
+```python
+env = environs.build(
+    environs.Pin(name="v077skill", version="0.77.2"),
+    Path("envs/v077skill"),
+    overlays=[
+        environs.Overlay(
+            source=Path("overlays/SKILL.md"),          # committed with the experiment
+            destination="soliplex/skills/bwrap_sandbox/SKILL.md",
+            note="SKILL.md as of v0.78.1",
+        )
+    ],
+    extra_requirements=("soliplex-lab-harness==0.1.0",),
+)
+```
+
+The overlay refuses to *create* a file: a typo in `destination` would
+otherwise silently add something the software never shipped, and the arm
+would measure software nobody runs. It also lands in `metadata()`, so the
+arm describes itself.
+
+### Everything shells out through an injected runner
+
+`build()` and `Pin.resolve_ref()` take a `runner`, so the whole module is
+testable without a network or a real `uv`. The default runner raises
+`CommandFailed` with the captured stderr.
+
 ## Caveats
 
 - `drive.run_trial` adjusts the process working directory and environment
@@ -89,6 +156,12 @@ afterwards is not a result.
   Call it once.
 - Instrumentation is local only (`send_to_logfire=False`): nothing leaves
   the machine.
+- `environs.build` shells out to `uv`, which must be on `PATH`.
+- Confirm that behavior-affecting **non-Python assets are packaged**. An
+  editable checkout exposes every file in the tree; an installed
+  distribution exposes only what its packaging includes, so an unpackaged
+  asset means an installed arm measures different software than a checkout
+  would. soliplex ships `SKILL.md` via `MANIFEST.in`'s `global-include`.
 
 ## Development
 
