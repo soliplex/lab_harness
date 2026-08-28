@@ -285,6 +285,16 @@ def apply_overlays(
     already have: an overlay is meant to *replace* shipped content, and a
     typo in ``destination`` would otherwise silently add a file the software
     never had, which measures something nobody ships.
+
+    The target is **unlinked before writing**, which is not optional. uv
+    installs by hardlinking out of its cache, so a freshly built
+    environment's files typically share an inode with the cache and with
+    every other environment holding the same distribution. Writing through
+    that hardlink -- as ``shutil.copyfile`` alone does -- mutates the shared
+    inode: it silently rewrites the same file in sibling environments *and*
+    poisons the cache for every later install of that version. The damage
+    is invisible until something compares an install against its own
+    ``RECORD``.
     """
     site = environment.site_packages()
     for overlay in overlays:
@@ -293,4 +303,5 @@ def apply_overlays(
         target = site / overlay.destination
         if not target.is_file():
             raise OverlayDestinationMissing(overlay.destination, site)
+        target.unlink()
         shutil.copyfile(overlay.source, target)

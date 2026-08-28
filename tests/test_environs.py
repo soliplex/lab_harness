@@ -284,3 +284,40 @@ def test_run_returns_stdout():
     out = environs.run(["python3", "-c", "print('hi')"])
 
     assert out.strip() == "hi"
+
+
+def test_overlay_does_not_write_through_a_hardlink(tmp_path):
+    """The bug that made an overlay corrupt a sibling environment.
+
+    uv installs by hardlinking out of its cache, so a fresh environment's
+    files share an inode with the cache and with every other environment
+    holding the same distribution. Writing through that link mutates all of
+    them at once. The overlay must break the link first.
+    """
+    root = tmp_path / "env"
+    site = make_venv(root)
+    shipped = site / "a.md"
+    shipped.write_text("original", encoding="utf-8")
+
+    # Stand in for uv's cache, and for a sibling environment.
+    cached = tmp_path / "cache" / "a.md"
+    cached.parent.mkdir()
+    cached.hardlink_to(shipped)
+    sibling = tmp_path / "sibling" / "a.md"
+    sibling.parent.mkdir()
+    sibling.hardlink_to(shipped)
+    assert shipped.stat().st_nlink == 3
+
+    source = tmp_path / "new.md"
+    source.write_text("overlaid", encoding="utf-8")
+    env = environs.Environment(
+        pin=environs.Pin(name="a", version="1.0"), root=root
+    )
+
+    environs.apply_overlays(
+        env, [environs.Overlay(source=source, destination="a.md")]
+    )
+
+    assert shipped.read_text(encoding="utf-8") == "overlaid"
+    assert cached.read_text(encoding="utf-8") == "original"
+    assert sibling.read_text(encoding="utf-8") == "original"
