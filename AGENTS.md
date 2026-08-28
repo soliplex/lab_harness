@@ -47,3 +47,21 @@ Release notes live in **GitHub Releases**. Do not add a `CHANGELOG.md`.
 There is no PyPI release. Consumers pin a tag:
 
     soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1
+
+### Tag convention
+
+Follow soliplex, which has held to this across 170-odd release tags:
+
+| tag | for |
+| --- | --- |
+| `v0.X` | the first release of a minor line |
+| `v0.X.N` | a bugfix release on that line |
+| `v0.X.N.M` | a packaging-only re-release of unchanged code |
+
+`version` in `pyproject.toml` is the tag without the leading `v` -- soliplex
+carries `version = "0.78"` at `v0.78`. So the first release of a line is
+`v0.1`, **not** `v0.1.0`: do not invent a third component that the
+convention does not use.
+
+Any pin written into documentation has to be updated in the same commit that
+changes the version, or the docs teach a pin that does not resolve.
