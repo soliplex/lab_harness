@@ -12,7 +12,7 @@ There is no PyPI release. Pin a tag:
 
 ```toml
 dependencies = [
-    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1",
+    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.1",
 ]
 ```
 
@@ -117,7 +117,7 @@ env = environs.build(
     released,
     Path("envs/v078"),
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.1",
     ),
 )
 print(env.python)        # interpreter to drive trials with
@@ -150,7 +150,7 @@ env = environs.build(
         )
     ],
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1.1",
     ),
 )
 ```

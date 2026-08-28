@@ -1,6 +1,6 @@
 [project]
 name = "soliplex-lab-harness"
-version = "0.1"
+version = "0.1.1"
 description = "Reusable machinery for measuring soliplex installation behavior"
 readme = "README.md"
 authors = [
