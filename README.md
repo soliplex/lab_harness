@@ -6,6 +6,20 @@ See the sibling [lab_bench](https://github.com/soliplex/lab_bench) repository
 for how it is intended to be used: this package is the part that does not
 change per experiment, and a jig depends on a pinned version of it.
 
+## Installing
+
+There is no PyPI release. Pin a tag:
+
+```toml
+dependencies = [
+    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1",
+]
+```
+
+Release notes live in
+[GitHub Releases](https://github.com/soliplex/lab_harness/releases); there is
+no `CHANGELOG.md` to keep in sync.
+
 ## What is here
 
 | module | does |
@@ -102,7 +116,9 @@ from_ref = environs.Pin(
 env = environs.build(
     released,
     Path("envs/v078"),
-    extra_requirements=("soliplex-lab-harness==0.1.0",),
+    extra_requirements=(
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1",
+    ),
 )
 print(env.python)        # interpreter to drive trials with
 print(env.metadata())    # stamp this onto every record from this arm
@@ -133,7 +149,9 @@ env = environs.build(
             note="SKILL.md as of v0.78.1",
         )
     ],
-    extra_requirements=("soliplex-lab-harness==0.1.0",),
+    extra_requirements=(
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.1",
+    ),
 )
 ```
 
