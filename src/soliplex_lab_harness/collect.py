@@ -1,4 +1,4 @@
-"""Capture the tool calls a run actually made.
+"""Capture the tool calls a run actually made, and what came back.
 
 Why this reads a span *attribute* rather than tool spans: an invented tool
 name never produces a tool span. ``ToolManager._resolve_tool`` rejects an
@@ -10,16 +10,36 @@ The agent run span does carry the whole message history, as
 ``Instrumentation._run_span_end_attributes``), and every tool-call part in it
 is recorded under the name the model actually used. That attribute is also
 what Logfire renders as a run's "events" list.
+
+Responses are kept alongside the calls because a retry and a success are
+indistinguishable without them: ``ToolReturnPart`` and ``RetryPromptPart``
+both serialize as ``type='tool_call_response'`` carrying ``id``, ``name``
+and ``result``, with no discriminator between them. Whether a call failed
+is therefore a question about its ``result`` text -- see
+``scoring.classify_result`` -- and can only be asked if the text is kept.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
 ALL_MESSAGES_ATTR = "pydantic_ai.all_messages"
+
+
+def _as_text(raw: Any) -> str:
+    """A response payload as text, whatever shape it arrived in."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    try:
+        return json.dumps(raw)
+    except (TypeError, ValueError):
+        return str(raw)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +48,7 @@ class ToolCall:
 
     name: str | None
     arguments: Any = None
+    id: str | None = None
 
     @property
     def parsed_arguments(self) -> dict[str, Any]:
@@ -45,22 +66,61 @@ class ToolCall:
         return raw if isinstance(raw, dict) else {}
 
 
-def tool_calls_from_history(history: str | list[Any]) -> list[ToolCall]:
-    """Extract tool calls, in order, from an OTel message history."""
+@dataclass(frozen=True, slots=True)
+class ToolResult:
+    """What came back for one tool call, under the tool's own name.
+
+    ``result`` is populated only when instrumentation was configured with
+    ``include_content=True``, which ``drive.install_collector`` does.
+    Without it the payload is absent and no outcome can be read.
+    """
+
+    name: str | None
+    id: str | None = None
+    result: Any = None
+
+    @property
+    def text(self) -> str:
+        return _as_text(self.result)
+
+
+def _parts(history: str | list[Any]) -> Iterator[dict[str, Any]]:
+    """Every part of every message, in order."""
     messages = json.loads(history) if isinstance(history, str) else history
-    calls: list[ToolCall] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
         for part in message.get("parts") or ():
-            if isinstance(part, dict) and part.get("type") == "tool_call":
-                calls.append(
-                    ToolCall(
-                        name=part.get("name"),
-                        arguments=part.get("arguments"),
-                    )
-                )
-    return calls
+            if isinstance(part, dict):
+                yield part
+
+
+def tool_calls_from_history(history: str | list[Any]) -> list[ToolCall]:
+    """Extract tool calls, in order, from an OTel message history."""
+    return [
+        ToolCall(
+            name=part.get("name"),
+            arguments=part.get("arguments"),
+            id=part.get("id"),
+        )
+        for part in _parts(history)
+        if part.get("type") == "tool_call"
+    ]
+
+
+def tool_results_from_history(
+    history: str | list[Any],
+) -> list[ToolResult]:
+    """Extract tool responses, in order, from an OTel message history."""
+    return [
+        ToolResult(
+            name=part.get("name"),
+            id=part.get("id"),
+            result=part.get("result"),
+        )
+        for part in _parts(history)
+        if part.get("type") == "tool_call_response"
+    ]
 
 
 class RunCollector:
@@ -92,19 +152,25 @@ class RunCollector:
         return True
 
     # -- consumption -------------------------------------------------
-    def take(self) -> tuple[list[ToolCall], str | None]:
-        """Return ``(calls, raw_history)`` for the run, and reset.
+    def take(
+        self,
+    ) -> tuple[list[ToolCall], list[ToolResult], str | None]:
+        """Return ``(calls, results, raw_history)``, and reset.
 
         A single turn can end more than one agent run span -- a title agent
         alongside the room agent, for instance -- so the longest history is
-        taken as the room turn. Returns ``([], None)`` when nothing was
+        taken as the room turn. Returns ``([], [], None)`` when nothing was
         captured.
         """
         if not self.histories:
-            return [], None
+            return [], [], None
         raw = max(self.histories, key=len)
         self.histories.clear()
-        return tool_calls_from_history(raw), raw
+        return (
+            tool_calls_from_history(raw),
+            tool_results_from_history(raw),
+            raw,
+        )
 
     def reset(self) -> None:
         self.histories.clear()

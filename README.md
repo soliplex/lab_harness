@@ -12,7 +12,7 @@ There is no PyPI release. Pin a tag:
 
 ```toml
 dependencies = [
-    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2",
+    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.3",
 ]
 ```
 
@@ -24,7 +24,7 @@ no `CHANGELOG.md` to keep in sync.
 
 | module | does |
 | --- | --- |
-| `collect` | captures the tool calls a run actually made |
+| `collect` | captures the tool calls a run made, and what came back |
 | `records` | one record per trial, appended to JSONL |
 | `drive` | runs one turn against an installation, in process |
 | `scoring` | turns records into rates, with pluggable checks |
@@ -44,6 +44,50 @@ null result then looks like a finding.
 instead. That carries the whole message history, and every tool-call part in
 it is recorded under the name the model actually used. It is also what
 Logfire renders as a run's "events" list.
+
+## Retries are the error signal that has room to move
+
+`ok` and `correct` sit at the ceiling in a room that works: the interesting
+question is what a run had to recover from on the way. Every `ModelRetry`
+reaches the model through `RetryPromptPart.model_response`, which appends
+`Fix the errors and try again.` -- and that suffix is the **only** marker
+distinguishing a retry from a success, because `ToolReturnPart` and
+`RetryPromptPart` both serialize as `type='tool_call_response'` with no
+discriminator. `collect` therefore keeps response payloads, and
+`scoring.classify_result` reads them:
+
+| shape | means |
+| --- | --- |
+| `retry-unknown-tool` | the model invented a tool name |
+| `retry-already-available` | a `load_capability` bounce |
+| `retry-validation` | argument validation rejected the call |
+| `retry-other` | some other `ModelRetry` |
+| `tool-error` | the tool ran and handed back a failure |
+
+Reading outcomes needs `include_content=True`, which
+`drive.install_collector` sets.
+
+## `None` is not zero
+
+`TrialRecord.tool_results` is `None` when outcomes were not captured and
+`[]` when they were captured and there were none. Anything counting them --
+`scoring.retry_count`, the `retried()` check -- returns `None` rather than
+`0` for a record that cannot answer, and `tally` drops those trials from
+that check's denominator instead of scoring them as misses. A record written
+before outcomes were captured therefore reports `-`, not a clean sheet.
+
+Same reasoning as the tool-span problem above: a null that reads as a
+result is the failure mode this package exists to avoid.
+
+## Dispersion, not just means
+
+`Tally` carries `turns`, `secs` and `retries` as `Dist` summaries -- mean,
+sd, median, min, max -- and `secs_per_turn`, which separates "more
+round-trips" from "slower round-trips". The first experiment to use this
+package found its result in a standard deviation collapsing from 8.6 to 1.5
+while the median barely moved; means alone would have shown nothing.
+`render_distributions` draws one metric at a time, apart from the rates
+table.
 
 ## No dependencies, on purpose
 
@@ -87,9 +131,11 @@ checks = [
     scoring.succeeded(),
     scoring.response_contains("40935.89"),
     scoring.invented_tool_name({"run", "run_python", "list_environments"}),
+    scoring.retried(),
 ]
 result = scoring.tally("before-gemma4", records.read(out), checks)
 print(scoring.render([result], checks))
+print(scoring.render_distributions([result], "turns"))
 ```
 
 `metadata` is open on purpose: stamp whatever identifies the arm -- resolved
@@ -117,7 +163,7 @@ env = environs.build(
     released,
     Path("envs/v078"),
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.3",
     ),
 )
 print(env.python)        # interpreter to drive trials with
@@ -150,7 +196,7 @@ env = environs.build(
         )
     ],
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.3",
     ),
 )
 ```

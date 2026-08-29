@@ -142,7 +142,7 @@ def run_trial(
         except Exception as exc:  # noqa: BLE001 -- recorded, not handled
             error = f"{type(exc).__name__}: {exc}"
 
-    calls, _raw = collector.take()
+    calls, results, _raw = collector.take()
     return records.TrialRecord(
         cell=cell,
         trial=trial,
@@ -151,5 +151,6 @@ def run_trial(
         error=error or (result.error if result is not None else None),
         response=result.response if result is not None else None,
         tool_calls=calls,
+        tool_results=results,
         metadata=dict(metadata or {}),
     )
