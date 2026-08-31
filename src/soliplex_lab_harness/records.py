@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+from collections.abc import Callable
 from collections.abc import Iterator
 from typing import Any
 
@@ -111,3 +112,45 @@ def iter_read(path: pathlib.Path) -> Iterator[TrialRecord]:
             line = line.strip()
             if line:
                 yield TrialRecord.from_dict(json.loads(line))
+
+
+def completed(path: pathlib.Path) -> int:
+    """How many records ``path`` already holds; 0 when it does not exist."""
+    return len(read(path)) if path.exists() else 0
+
+
+def top_up(
+    path: pathlib.Path,
+    trials: int,
+    run: Callable[[int], TrialRecord],
+    *,
+    on_trial: Callable[[TrialRecord], None] | None = None,
+) -> int:
+    """Top ``path`` up to ``trials`` records, and say how many ran.
+
+    ``trials`` is a **target, not a count**. Records already in the file
+    count toward it, so a smoke trial can be run and verified before
+    extending to the full N without discarding it, and an interrupted run
+    resumes instead of restarting or double-counting.
+
+    A file that already holds enough is success, not an error: nothing runs
+    and ``0`` comes back.
+
+    Each record is appended as it arrives, so an interrupt loses at most one
+    trial. ``on_trial`` runs only after the record is on disk; progress
+    reporting stays the caller's business, because the line worth printing
+    is usually particular to the experiment.
+
+    ``run`` is handed the trial index. Trials are sequential by design --
+    ``drive.run_trial`` adjusts the process cwd and environment, so running
+    them concurrently is not safe.
+    """
+    done = completed(path)
+    if done >= trials:
+        return 0
+    for trial in range(done, trials):
+        record = run(trial)
+        append(path, record)
+        if on_trial is not None:
+            on_trial(record)
+    return trials - done

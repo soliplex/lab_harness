@@ -29,7 +29,7 @@ where the current tag is; there is no `CHANGELOG.md` to keep in sync.
 | module | does |
 | --- | --- |
 | `collect` | captures the tool calls a run made, and what came back |
-| `records` | one record per trial, appended to JSONL |
+| `records` | one record per trial, appended to JSONL; tops a file up to N |
 | `drive` | runs one turn against an installation, in process |
 | `scoring` | turns records into rates, with pluggable checks |
 | `environs` | builds one virtualenv per code-axis value |
@@ -119,8 +119,10 @@ target = drive.Target(
 installation = drive.load_installation(target)
 
 out = Path("results/before-gemma4.jsonl")
-for trial in range(20):
-    record = drive.run_trial(
+records.top_up(
+    out,
+    20,
+    lambda trial: drive.run_trial(
         target,
         "What is the total order value for the Southeast region?",
         cell="before-gemma4",
@@ -128,8 +130,9 @@ for trial in range(20):
         collector=collector,
         installation=installation,
         metadata={"ref": "v0.78.1", "model": "gemma4-26b"},
-    )
-    records.append(out, record)
+    ),
+    on_trial=lambda record: print(record.cell, record.trial, record.ok),
+)
 
 checks = [
     scoring.succeeded(),
@@ -141,6 +144,12 @@ result = scoring.tally("before-gemma4", records.read(out), checks)
 print(scoring.render([result], checks))
 print(scoring.render_distributions([result], "turns"))
 ```
+
+`top_up` takes a **target, not a count**: records already in `out` count
+toward the 20, so a smoke trial can be run and verified before extending to
+the full N without discarding it, and an interrupted run resumes rather than
+restarting. Each record is appended as it arrives, so an interrupt loses at
+most one trial.
 
 `metadata` is open on purpose: stamp whatever identifies the arm -- resolved
 commit sha, exact model id, endpoint. A result whose arm cannot be identified
