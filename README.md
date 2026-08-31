@@ -33,6 +33,7 @@ where the current tag is; there is no `CHANGELOG.md` to keep in sync.
 | `drive` | runs one turn against an installation, in process |
 | `scoring` | turns records into rates, with pluggable checks |
 | `environs` | builds one virtualenv per code-axis value |
+| `preconditions` | refuses a run whose cells cannot answer the question |
 
 Import the modules, not names from the package root.
 
@@ -154,6 +155,53 @@ most one trial.
 `metadata` is open on purpose: stamp whatever identifies the arm -- resolved
 commit sha, exact model id, endpoint. A result whose arm cannot be identified
 afterwards is not a result.
+
+## Preconditions: refuse before spending trials
+
+A cell that structurally cannot exhibit the behaviour under test still
+produces numbers, and those numbers read as a finding. Two nulls in the work
+that motivated this package were burned exactly that way, and every defect
+caught since has been silent in the same manner: the run completed and the
+table looked plausible.
+
+`preconditions` owns the part of that which is not experiment-specific -- a
+result record, a renderer, and a way to refuse:
+
+```python
+from soliplex_lab_harness import preconditions
+
+def check(cell, trials):
+    return [
+        preconditions.Result(
+            cell, "a turn completes", trials[0].ok, trials[0].error or ""
+        ),
+        preconditions.Result(
+            cell,
+            "deferral engages",
+            any("load_capability" in t.call_names for t in trials),
+        ),
+    ]
+
+results = [r for cell in cells for r in check(cell, read(cell))]
+print(preconditions.render(results))
+preconditions.assert_ok(results)   # raises Failed, naming each one
+```
+
+**What a check *is* stays with the experiment.** A check is any function
+returning `Result` values, because what is worth asserting differs entirely
+between sets. This module deliberately does not define a check type, a
+registry, or a runner: there is one working example to generalise from, and
+that is enough to justify the record but not an abstraction over it.
+
+`render([])` reports `no preconditions were checked` rather than saying
+everything holds. Nothing checked is not the same as nothing wrong, and
+losing that distinction is the failure this module exists to prevent.
+
+Nothing here drives a turn -- a check reads what a run already recorded. The
+checks that need no turn belong with whatever they check, on the principle of
+make-the-thing-then-verify-the-thing: `environs.verify_install` compares an
+install against its own RECORD at build time and raises there, where the
+error cannot be skipped or mistaken for a measurement failure.
 
 ## Code axes install; they do not check out
 
