@@ -46,7 +46,12 @@ Release notes live in **GitHub Releases**. Do not add a `CHANGELOG.md`.
 
 There is no PyPI release. Consumers pin a tag:
 
-    soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.2
+    soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@vX.Y
+
+`@vX.Y` is a **placeholder, and stays one.** Prose does not name a concrete
+version here. The current one lives in `pyproject.toml` and on the releases
+page -- two places that cannot drift, because one is the artifact and the
+other is generated from the tag.
 
 ### Tag convention
 
@@ -63,5 +68,16 @@ carries `version = "0.78"` at `v0.78`. So the first release of a line is
 `v0.1`, **not** `v0.1.0`: do not invent a third component that the
 convention does not use.
 
-Any pin written into documentation has to be updated in the same commit that
-changes the version, or the docs teach a pin that does not resolve.
+### A feature change never touches `version`
+
+`version` in `pyproject.toml` is release bookkeeping, and releasing is a
+decision the maintainer makes -- not a side effect of merging a feature. A
+pull request that adds or fixes behaviour leaves `version` exactly as it
+found it. Bumping it and applying the tag is a separate, deliberate commit.
+
+This replaces an earlier rule requiring every documented pin to be updated
+in the commit that changed the version. That rule failed twice over: it
+pulled release bookkeeping into feature work, and it did not even keep the
+docs current -- the pin above sat at `v0.2` for the whole of the `v0.3`
+line, teaching a version two releases stale. A placeholder cannot go stale,
+so there is nothing left to remember.

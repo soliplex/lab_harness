@@ -12,13 +12,17 @@ There is no PyPI release. Pin a tag:
 
 ```toml
 dependencies = [
-    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.3",
+    "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@vX.Y",
 ]
 ```
 
+`vX.Y` is a placeholder: substitute the version you mean to pin. This page
+deliberately names no particular one, so that it cannot come to recommend a
+release that has been superseded.
+
 Release notes live in
-[GitHub Releases](https://github.com/soliplex/lab_harness/releases); there is
-no `CHANGELOG.md` to keep in sync.
+[GitHub Releases](https://github.com/soliplex/lab_harness/releases), which is
+where the current tag is; there is no `CHANGELOG.md` to keep in sync.
 
 ## What is here
 
@@ -163,7 +167,7 @@ env = environs.build(
     released,
     Path("envs/v078"),
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.3",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@vX.Y",
     ),
 )
 print(env.python)        # interpreter to drive trials with
@@ -173,7 +177,9 @@ print(env.metadata())    # stamp this onto every record from this arm
 `extra_requirements` normally includes this package, because a trial is
 driven in process: the harness has to be importable in the environment that
 holds the software under test. Passing it explicitly also forces the
-experiment to record *which harness version measured the run*.
+experiment to record *which harness version measured the run*. The example
+here uses the same `X.Y` placeholders used elsewhere: they must be replaced
+with the specific version of this package which the trial requires.
 
 `build()` resolves a tag or branch to a **commit sha** via `git ls-remote`
 and puts it in `metadata()`. Recording a tag records nothing -- tags can be
@@ -196,7 +202,7 @@ env = environs.build(
         )
     ],
     extra_requirements=(
-        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@v0.3",
+        "soliplex-lab-harness @ git+https://github.com/soliplex/lab_harness@vX.Y",
     ),
 )
 ```
